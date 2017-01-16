@@ -84,7 +84,17 @@ backup_zimbra()
 
 	export PASSPHRASE="$DUPLICITY_PASSPHRASE"
 	"$DUPLICITY" "$ZIMBRA_INDEX_DIR" "file:///$ZIMBRA_SAVE/$(basename $ZIMBRA_INDEX_DIR)"
-#	"$DUPLICITY" "$ZIMBRA_STORE_DIR" "file:///$ZIMBRA_SAVE/$(basename $ZIMBRA_STORE_DIR)"
+	"$DUPLICITY" "$ZIMBRA_STORE_DIR" "file:///$ZIMBRA_SAVE/$(basename $ZIMBRA_STORE_DIR)"
+}
+
+backup_openfire()
+{
+	OPENFIRE_SAVE="$BACKUPSAVE/openfire/$FULL_TIMESTAMP"
+	mkdir -p "$OPENFIRE_SAVE"
+	
+	# untuk sementara copy aja direktori openfirenya
+	export PASSPHRASE="$DUPLICITY_PASSPHRASE"
+	"$DUPLICITY" "$OPENFIRE_DIR" "$OPENFIRE_SAVE/openfire"
 }
 
 
