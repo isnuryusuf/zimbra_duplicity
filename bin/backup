@@ -1,0 +1,123 @@
+#Created by Muhammad Solihin I-3
+#!/bin/bash
+CONF_DIR="$(dirname $0)/.."
+. "$CONF_DIR/backup.conf"
+
+#temporary, nanti diganti
+BACKUP_SAVE="/mnt/backup_smb/testing_backup"
+
+#dihold dulu
+smb_mount ()
+{
+	SMB_OPTIONS=""
+        MOUNTED_URL=$(mount | grep "$SMB_URL" | sed -e 's/^.*on //g' -e 's/ type.*$//')
+	if [ "$SMB_USER" == "guest" ]
+	then
+		SMB_OPTIONS="${SMB_OPTIONS}guest"
+	else
+		SMB_OPTIONS="${SMB_OPTIONS}username=\"${SMB_USER}\",password=\"${SMB_PASSWORD}\",domain=\"${SMB_DOMAIN}\""
+	fi
+
+
+	echo $SMB_OPTIONS
+}
+
+FULL_TIMESTAMP=""
+NOW_TIMESTAMP=""
+generate_timestamp ()
+{
+	FULL_DAY_NUM=$(date -d "${FULL_DAY}" +%w)
+	NOW_NUM=$(date +%w)
+	if [ "$NOW_NUM" -ge "$FULL_DAY_NUM" ]
+	then
+		DAYS_AGO_NUM=$[NOW_NUM-FULL_DAY_NUM]
+	else
+		DAYS_AGO_NUM=$[7+NOW_NUM-FULL_DAY_NUM]
+	fi
+	FULL_TIMESTAMP=$(date -d "${DAYS_AGO_NUM} days ago" +%F)
+	NOW_TIMESTAMP=$(date +%F)
+}
+
+backup_alfresco ()
+{
+	ALFRESCO_SAVE="$BACKUP_SAVE/alfresco/$FULL_TIMESTAMP"
+	ALFRESCO_PROPERTIES="$ALFRESCO_DIR/tomcat/shared/classes/alfresco-global.properties"
+	ALFRESCO_PGSQL_BINDIR="$ALFRESCO_DIR/postgresql/bin"
+	ALFRESCO_PGSQLDUMP="$ALFRESCO_PGSQL_BINDIR/pg_dump"
+
+	mkdir -p "$ALFRESCO_SAVE"
+	cp "$ALFRESCO_PROPERTIES" "$ALFRESCO_SAVE/$(basename $ALFRESCO_PROPERTIES).$NOW_TIMESTAMP"
+
+	export PGPASSWORD="$ALFRESCO_PGPASSWORD"
+	"$ALFRESCO_PGSQLDUMP" -Ft -b alfresco > "$ALFRESCO_SAVE/pgsql_dump.tar.$NOW_TIMESTAMP"
+
+	mkdir -p "$ALFRESCO_SAVE/alf_data"
+	export PASSPHRASE="$DUPLICITY_PASSPHRASE"
+	"$DUPLICITY" "$ALFRESCO_DIR/alf_data" "file:///$ALFRESCO_SAVE/alf_data"
+}
+
+backup_zimbra()
+{
+	ZIMBRA_SAVE="$BACKUP_SAVE/zimbra/$FULL_TIMESTAMP"
+	mkdir -p "$ZIMBRA_SAVE"
+
+	ZIMBRA_INDEX_DIR="$ZIMBRA_DIR/index"
+	ZIMBRA_STORE_DIR="$ZIMBRA_DIR/store"
+	ZIMBRA_LDAP_DIR="$ZIMBRA_DIR/data/ldap"
+	ZIMBRA_ZMSLAPCAT="$ZIMBRA_DIR/libexec/zmslapcat"
+	ZIMBRA_MYSQLDUMP="$ZIMBRA_DIR/mysql/bin/mysqldump"
+	ZIMBRA_LOCALCONFIG="$ZIMBRA_DIR/conf/localconfig.xml"
+	ZIMBRA_ZMLOCALCONFIG="$ZIMBRA_DIR/bin/zmlocalconfig"
+	ZIMBRA_MYSQLSOCK="$ZIMBRA_DIR/db/mysql.sock"
+
+	cp "$ZIMBRA_LOCALCONFIG" "$ZIMBRA_SAVE/$(basename $ZIMBRA_LOCALCONFIG).$NOW_TIMESTAMP"
+
+	ZIMBRA_LDAP_TMP="/tmp/zimbra_backup_$NOW_TIMESTAMP"
+	mkdir -p "$ZIMBRA_LDAP_TMP"
+	chown zimbra:zimbra "$ZIMBRA_LDAP_TMP"
+	su - zimbra -c "$ZIMBRA_ZMSLAPCAT $ZIMBRA_LDAP_TMP"
+	mv "$ZIMBRA_LDAP_TMP/ldap.bak" "$ZIMBRA_SAVE/ldap.bak.$NOW_TIMESTAMP"
+	rm -rf "$ZIMBRA_LDAP_TMP"
+
+	su - zimbra -c "$ZIMBRA_MYSQLDUMP -f -S $ZIMBRA_MYSQLSOCK -u zimbra --password=`$ZIMBRA_ZMLOCALCONFIG -s -m nokey zimbra_mysql_password` --all-databases --single-transaction > /tmp/mysql.sql.$NOW_TIMESTAMP"
+	mv /tmp/mysql.sql.$NOW_TIMESTAMP "$ZIMBRA_SAVE"
+
+	export PASSPHRASE="$DUPLICITY_PASSPHRASE"
+	"$DUPLICITY" "$ZIMBRA_INDEX_DIR" "file:///$ZIMBRA_SAVE/$(basename $ZIMBRA_INDEX_DIR)"
+#	"$DUPLICITY" "$ZIMBRA_STORE_DIR" "file:///$ZIMBRA_SAVE/$(basename $ZIMBRA_STORE_DIR)"
+}
+
+
+generate_timestamp
+FILENAME="$(basename $0)"
+EXTENSION="${FILENAME##*.}"
+
+BACKUP_ARG="$EXTENSION"
+case "$EXTENSION" in
+	alfresco) ;;
+	openfire);;
+	zimbra);;
+	*)
+		BACKUP_ARG="$*";;
+esac
+
+if [ -z "$BACKUP_ARG" ]
+then
+	BACKUP_ARG="openfire alfresco zimbra"
+fi
+
+for BAK in $BACKUP_ARG
+do
+	case "$BAK" in
+		openfire) echo "Backuping Openfire"
+			  #backup_openfire 
+			  ;;
+		zimbra) echo "Backuping Zimbra"
+			backup_zimbra 
+			;;
+		alfresco) echo "Backuping Alfresco"
+			backup_alfresco 
+			;;
+	esac
+done
+
