@@ -120,7 +120,7 @@ for BAK in $BACKUP_ARG
 do
 	case "$BAK" in
 		openfire) echo "Backuping Openfire"
-			  #backup_openfire 
+			  backup_openfire 
 			  ;;
 		zimbra) echo "Backuping Zimbra"
 			backup_zimbra 
