@@ -17,3 +17,4 @@ bin/backup alfresco openfire
 ##TODO:
 * SMB MOUNTING
 * LOG and ERROR EXCEPTION
+* REMOVE PREVIOUS BACKUP
