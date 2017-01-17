@@ -94,7 +94,7 @@ backup_openfire()
 	
 	# untuk sementara copy aja direktori openfirenya
 	export PASSPHRASE="$DUPLICITY_PASSPHRASE"
-	"$DUPLICITY" "$OPENFIRE_DIR" "$OPENFIRE_SAVE/openfire"
+	"$DUPLICITY" "$OPENFIRE_DIR" "file:///$OPENFIRE_SAVE/openfire"
 }
 
 
