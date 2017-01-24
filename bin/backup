@@ -89,7 +89,7 @@ backup_zimbra()
 
 backup_openfire()
 {
-	OPENFIRE_SAVE="$BACKUPSAVE/openfire/$FULL_TIMESTAMP"
+	OPENFIRE_SAVE="$BACKUP_SAVE/openfire/$FULL_TIMESTAMP"
 	mkdir -p "$OPENFIRE_SAVE"
 	
 	# untuk sementara copy aja direktori openfirenya
