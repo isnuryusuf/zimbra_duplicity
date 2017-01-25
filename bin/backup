@@ -69,6 +69,9 @@ backup_alfresco ()
 	mkdir -p "$ALFRESCO_SAVE/alf_data"
 	export PASSPHRASE="$DUPLICITY_PASSPHRASE"
 	"$DUPLICITY" "$ALFRESCO_DIR/alf_data" "file:///$ALFRESCO_SAVE/alf_data"
+
+	echo "Deleting old alfresco backup"
+	del_old "${ALFRESCO_SAVE}/.."
 }
 
 backup_zimbra()
@@ -100,6 +103,9 @@ backup_zimbra()
 	export PASSPHRASE="$DUPLICITY_PASSPHRASE"
 	"$DUPLICITY" "$ZIMBRA_INDEX_DIR" "file:///$ZIMBRA_SAVE/$(basename $ZIMBRA_INDEX_DIR)"
 	"$DUPLICITY" "$ZIMBRA_STORE_DIR" "file:///$ZIMBRA_SAVE/$(basename $ZIMBRA_STORE_DIR)"
+
+	echo "Deleting old zimbra backup"
+	del_old "${ZIMBRA_SAVE}/.."
 }
 
 backup_openfire()
@@ -110,6 +116,9 @@ backup_openfire()
 	# untuk sementara copy aja direktori openfirenya
 	export PASSPHRASE="$DUPLICITY_PASSPHRASE"
 	"$DUPLICITY" "$OPENFIRE_DIR" "file:///$OPENFIRE_SAVE/openfire"
+
+	echo "Deleting old openfire backup"
+	del_old "${OPENFIRE_SAVE}/.."
 }
 
 del_old()
