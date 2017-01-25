@@ -3,7 +3,6 @@
 CONF_DIR="$(dirname $0)/.."
 . "$CONF_DIR/backup.conf"
 
-#temporary, nanti diganti
 BACKUP_SAVE=""
 smb_mount ()
 {
@@ -111,6 +110,16 @@ backup_openfire()
 	# untuk sementara copy aja direktori openfirenya
 	export PASSPHRASE="$DUPLICITY_PASSPHRASE"
 	"$DUPLICITY" "$OPENFIRE_DIR" "file:///$OPENFIRE_SAVE/openfire"
+}
+
+del_old()
+{
+	if [ "$MAX_KEEP" -ne 0 ]
+	then
+		find -maxdepth 1 -mtime +${MAX_KEEP} -and -not -path "$1"
+	else
+		echo "Not configured to delete old backup"
+	fi
 }
 
 
