@@ -125,7 +125,7 @@ del_old()
 {
 	if [ "$MAX_KEEP" -ne 0 ]
 	then
-		find -maxdepth 1 -mtime +${MAX_KEEP} -and -not -path "$1"
+		find "$1" -maxdepth 1 -mtime +${MAX_KEEP} -and -not -path "$1"
 	else
 		echo "Not configured to delete old backup"
 	fi
