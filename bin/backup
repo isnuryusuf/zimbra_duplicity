@@ -125,7 +125,15 @@ del_old()
 {
 	if [ "$MAX_KEEP" -ne 0 ]
 	then
-		find "$1" -maxdepth 1 -mtime +${MAX_KEEP} -and -not -path "$1"
+		IFS=$'\n'
+		DIR_DEL="$(find "$1" -maxdepth 1 -mtime +${MAX_KEEP} -and -not -path "$1")"
+		for i in $DIR_DEL
+		do
+			echo "Deleting $i"
+			rm -rf "$i"
+		done
+		unset IFS
+
 	else
 		echo "Not configured to delete old backup"
 	fi
