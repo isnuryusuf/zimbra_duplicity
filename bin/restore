@@ -1,0 +1,156 @@
+#Created by Muhammad Solihin I-3
+#!/bin/bash
+CONF_DIR="$(dirname $0)/.."
+. "$CONF_DIR/backup.conf"
+
+smb_mount ()
+{
+        SMB_OPTIONS=""
+        MOUNTED_URL=$(mount | grep "$SMB_URL" | sed -e 's/^.*on //g' -e 's/ type.*$//')
+
+        # if smb isn't mounted yet
+        if [ "$MOUNTED_URL" != "$SMB_MOUNT_DIR" ]
+        then
+                # mounting smb
+                echo "Mounting samba file share to $SMB_MOUNT_DIR"
+                if [ "$SMB_USER" == "guest" ]
+                then
+                        SMB_OPTIONS="${SMB_OPTIONS}guest"
+                else
+                        SMB_OPTIONS="${SMB_OPTIONS}username=${SMB_USER},password=${SMB_PASSWORD},domain=${SMB_DOMAIN}"
+                fi
+
+                mkdir -p "$SMB_MOUNT_DIR"
+                mount.cifs "$SMB_URL" "$SMB_MOUNT_DIR" -o "$SMB_OPTIONS"
+                if [ "$?" -ne 0 ]
+                then
+                        echo "Could not mount smb" >&2 
+                        exit -1
+                else
+                        MOUNTED_URL="$SMB_MOUNT_DIR"
+                fi
+        else
+                echo "SMB file share is already mounted on $MOUNTED_URL"
+        fi
+        BACKUP_SAVE="${MOUNTED_URL}/${BACKUP_DIR}"
+}
+
+restore_zimbra_ldap()
+{
+	ZIMBRA_DATE="$1"
+	generate_timestamp "$ZIMBRA_DATE"
+	ZIMBRA_BACKUP_DIR="$BACKUP_SAVE/zimbra/$FULL_TIMESTAMP"
+	ZIMBRA_ZMLOCALCONFIG="$ZIMBRA_DIR/conf/localconfig.xml"
+	ZIMBRA_LDAP_DIR="$ZIMBRA_DIR/data/ldap"
+	ZIMBRA_LDAP_MDB_DIR="$ZIMBRA_LDAP_DIR/mdb"
+	ZIMBRA_LDAP_CONFIG="$ZIMBRA_LDAP_DIR/config"
+	ZIMBRA_BACKUP_ZMLOCALCONFIG="$ZIMBRA_BACKUP_DIR/localconfig.xml.$ZIMBRA_DATE"
+	ZIMBRA_BACKUP_LDAP="$ZIMBRA_BACKUP_DIR/ldap.bak.$ZIMBRA_DATE"
+	ZIMBRA_SLAPADD="$ZIMBRA_DIR/openldap/sbin/slapadd"
+
+
+	#cek file backup
+	#cek file zmlocalconfig
+	if [ -e "$ZIMBRA_BACKUP_ZMLOCALCONFIG" ]
+	then
+		echo "zmlocalconfig found"
+	else
+		echo "zmlocalconfig not found. Exiting" >&2
+		exit 1
+	fi
+
+	#cek file ldap
+	if [ -e "$ZIMBRA_BACKUP_LDAP" ]
+	then
+		echo "LDAP dump found"
+	else
+		echo "LDAP dump not found. Exiting" >&2
+	fi
+
+	#stop zimbra
+	/etc/init.d/zimbra stop
+
+	#backup file zmlocalconfig yang sekarang
+	ZIMBRA_ZMLOCALCONFIG_TMP="${ZIMBRA_ZMLOCALCONFIG}.bak.$(date +%Y%m%d%H%M%S)"
+	echo "Backuping current zmlocalconfig"
+	cp "$ZIMBRA_ZMLOCALCONFIG" "$ZIMBRA_ZMLOCALCONFIG_TMP"
+	if [ "$?" -ne 0 ]
+	then
+		echo "Failed to backup zmlocalconfig, exiting"
+		exit 1
+	fi
+
+	#todo: restore zmlocalconfig
+	echo "Restore zmlocalconfig"
+	cp  "$ZIMBRA_BACKUP_ZMLOCALCONFIG" "$ZIMBRA_ZMLOCALCONFIG"
+
+	#todo: kalo fail, kembalikan backupan zmlocalconfig yang tadi
+	if [ "$?" -ne 0 ]
+	then
+		echo "Failed to restore zmlocalconfig, restore previous zmlocalconfig" >&2
+		cp "$ZIMBRA_ZMLOCALCONFIG_TMP" "$ZIMBRA_ZMLOCALCONFIG" 
+	fi
+
+	#todo: backup ldap yang sekarang
+	echo "Backuping current ldap dir"
+	ZIMBRA_LDAP_MDB_TMP="${ZIMBRA_LDAP_MDB_DIR}.bak.$(date +%Y%m%d%H%M%S)"
+	mv "$ZIMBRA_LDAP_MDB_DIR" "$ZIMBRA_LDAP_MDB_TMP"
+	if [ "$?" -ne 0 ]
+	then
+		echo "Failed to backup ldap dir, restore previous zmlocalconfig, exiting" >&2
+		cp "$ZIMBRA_ZMLOCALCONFIG_TMP" "$ZIMBRA_ZMLOCALCONFIG" 
+		exit 1
+	fi
+	
+
+	#todo: restore ldap
+	echo "Restore ldap"
+	mkdir -p "$ZIMBRA_LDAP_MDB_DIR"/{db,logs} 
+	chown -R zimbra:zimbra "$ZIMBRA_LDAP_MDB_DIR"
+	chmod -R 755 "$ZIMBRA_LDAP_MDB_DIR"
+	
+	su - zimbra -c "$ZIMBRA_SLAPADD -F $ZIMBRA_LDAP_CONFIG -qcv -l $ZIMBRA_BACKUP_LDAP"
+	
+	#todo: kalo fail, kembalikan backupan zmlocalconfig dan ldap
+	if [ "$?" -ne 0 ]
+	then
+		echo "restore LDAP failed, restore previous zmlocalconfig and ldap" >&2
+		cp "$ZIMBRA_ZMLOCALCONFIG_TMP" "$ZIMBRA_ZMLOCALCONFIG" 
+		rm -rf "$ZIMBRA_LDAP_MDB_DIR"
+		mv "$ZIMBRA_LDAP_MDB_TMP" "$ZIMBRA_LDAP_MDB_DIR"
+		exit 1
+	fi
+}
+
+#restore_ldap_mailbox()
+#{
+#
+#}
+
+if [ "$URL_TYPE" == "smb" ]
+then
+        smb_mount
+else
+        BACKUP_SAVE="$BACKUP_DIR"
+fi
+echo "Backup will be restored from $BACKUP_SAVE"
+
+FULL_TIMESTAMP=""
+NOW_TIMESTAMP=""
+generate_timestamp ()
+{
+        FULL_DAY_NUM=$(date -d "${FULL_DAY}" +%w)
+        BACKUP_NUM=$(date -d "$1" +%w)
+        if [ "$BACKUP_NUM" -ge "$FULL_DAY_NUM" ]
+        then
+                DAYS_AGO_NUM=$[BACKUP_NUM-FULL_DAY_NUM]
+        else
+                DAYS_AGO_NUM=$[7+BACKUP_NUM-FULL_DAY_NUM]
+        fi
+        FULL_TIMESTAMP=$(date -d "${DAYS_AGO_NUM} days ago" +%F)
+        NOW_TIMESTAMP=$(date +%F)
+}
+
+
+restore_zimbra_ldap "$1"
+/etc/init.d/zimbra start
