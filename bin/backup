@@ -97,7 +97,8 @@ backup_zimbra()
 	mv "$ZIMBRA_LDAP_TMP/ldap.bak" "$ZIMBRA_SAVE/ldap.bak.$NOW_TIMESTAMP"
 	rm -rf "$ZIMBRA_LDAP_TMP"
 
-	su - zimbra -c "$ZIMBRA_MYSQLDUMP -f -S $ZIMBRA_MYSQLSOCK -u zimbra --password=`$ZIMBRA_ZMLOCALCONFIG -s -m nokey zimbra_mysql_password` --all-databases --single-transaction > /tmp/mysql.sql.$NOW_TIMESTAMP"
+	su - zimbra -c "$ZIMBRA_MYSQLDUMP -f -S $ZIMBRA_MYSQLSOCK -u root --password=`$ZIMBRA_ZMLOCALCONFIG -s -m nokey mysql_root_password` --all-databases --single-transaction --flush-logs > /tmp/mysql.sql.$NOW_TIMESTAMP"
+#	su - zimbra -c "$ZIMBRA_MYSQLDUMP -f -S $ZIMBRA_MYSQLSOCK -u zimbra --password=`$ZIMBRA_ZMLOCALCONFIG -s -m nokey zimbra_mysql_password` --all-databases --single-transaction > /tmp/mysql.sql.$NOW_TIMESTAMP"
 	mv /tmp/mysql.sql.$NOW_TIMESTAMP "$ZIMBRA_SAVE"
 
 	export PASSPHRASE="$DUPLICITY_PASSPHRASE"
