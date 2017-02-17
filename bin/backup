@@ -3,24 +3,39 @@
 CONF_DIR="$(dirname $0)/.."
 . "$CONF_DIR/backup.conf"
 
-#temporary, nanti diganti
-BACKUP_SAVE="/mnt/backup_smb/testing_backup"
-
-#dihold dulu
+BACKUP_SAVE=""
 smb_mount ()
 {
-	SMB_OPTIONS=""
+        SMB_OPTIONS=""
         MOUNTED_URL=$(mount | grep "$SMB_URL" | sed -e 's/^.*on //g' -e 's/ type.*$//')
-	if [ "$SMB_USER" == "guest" ]
-	then
-		SMB_OPTIONS="${SMB_OPTIONS}guest"
-	else
-		SMB_OPTIONS="${SMB_OPTIONS}username=\"${SMB_USER}\",password=\"${SMB_PASSWORD}\",domain=\"${SMB_DOMAIN}\""
-	fi
 
+        # if smb isn't mounted yet
+        if [ "$MOUNTED_URL" != "$SMB_MOUNT_DIR" ]
+        then
+                # mounting smb
+                echo "Mounting samba file share to $SMB_MOUNT_DIR"
+                if [ "$SMB_USER" == "guest" ]
+                then
+                        SMB_OPTIONS="${SMB_OPTIONS}guest"
+                else
+                        SMB_OPTIONS="${SMB_OPTIONS}username=${SMB_USER},password=${SMB_PASSWORD},domain=${SMB_DOMAIN}"
+                fi
 
-	echo $SMB_OPTIONS
+                mkdir -p "$SMB_MOUNT_DIR"
+                mount.cifs "$SMB_URL" "$SMB_MOUNT_DIR" -o "$SMB_OPTIONS"
+                if [ "$?" -ne 0 ]
+                then
+                        echo "Could not mount smb" >&2 
+                        exit -1
+                else
+                        MOUNTED_URL="$SMB_MOUNT_DIR"
+                fi
+        else
+                echo "SMB file share is already mounted on $MOUNTED_URL"
+        fi
+        BACKUP_SAVE="${MOUNTED_URL}/${BACKUP_DIR}"
 }
+
 
 FULL_TIMESTAMP=""
 NOW_TIMESTAMP=""
@@ -54,6 +69,9 @@ backup_alfresco ()
 	mkdir -p "$ALFRESCO_SAVE/alf_data"
 	export PASSPHRASE="$DUPLICITY_PASSPHRASE"
 	"$DUPLICITY" "$ALFRESCO_DIR/alf_data" "file:///$ALFRESCO_SAVE/alf_data"
+
+	echo "Deleting old alfresco backup"
+	del_old "${ALFRESCO_SAVE}/.."
 }
 
 backup_zimbra()
@@ -79,14 +97,57 @@ backup_zimbra()
 	mv "$ZIMBRA_LDAP_TMP/ldap.bak" "$ZIMBRA_SAVE/ldap.bak.$NOW_TIMESTAMP"
 	rm -rf "$ZIMBRA_LDAP_TMP"
 
-	su - zimbra -c "$ZIMBRA_MYSQLDUMP -f -S $ZIMBRA_MYSQLSOCK -u zimbra --password=`$ZIMBRA_ZMLOCALCONFIG -s -m nokey zimbra_mysql_password` --all-databases --single-transaction > /tmp/mysql.sql.$NOW_TIMESTAMP"
+	su - zimbra -c "$ZIMBRA_MYSQLDUMP -f -S $ZIMBRA_MYSQLSOCK -u root --password=`$ZIMBRA_ZMLOCALCONFIG -s -m nokey mysql_root_password` --all-databases --single-transaction --flush-logs > /tmp/mysql.sql.$NOW_TIMESTAMP"
+#	su - zimbra -c "$ZIMBRA_MYSQLDUMP -f -S $ZIMBRA_MYSQLSOCK -u zimbra --password=`$ZIMBRA_ZMLOCALCONFIG -s -m nokey zimbra_mysql_password` --all-databases --single-transaction > /tmp/mysql.sql.$NOW_TIMESTAMP"
 	mv /tmp/mysql.sql.$NOW_TIMESTAMP "$ZIMBRA_SAVE"
 
 	export PASSPHRASE="$DUPLICITY_PASSPHRASE"
 	"$DUPLICITY" "$ZIMBRA_INDEX_DIR" "file:///$ZIMBRA_SAVE/$(basename $ZIMBRA_INDEX_DIR)"
-#	"$DUPLICITY" "$ZIMBRA_STORE_DIR" "file:///$ZIMBRA_SAVE/$(basename $ZIMBRA_STORE_DIR)"
+	"$DUPLICITY" "$ZIMBRA_STORE_DIR" "file:///$ZIMBRA_SAVE/$(basename $ZIMBRA_STORE_DIR)"
+
+	echo "Deleting old zimbra backup"
+	del_old "${ZIMBRA_SAVE}/.."
 }
 
+backup_openfire()
+{
+	OPENFIRE_SAVE="$BACKUP_SAVE/openfire/$FULL_TIMESTAMP"
+	mkdir -p "$OPENFIRE_SAVE"
+	
+	# untuk sementara copy aja direktori openfirenya
+	export PASSPHRASE="$DUPLICITY_PASSPHRASE"
+	"$DUPLICITY" "$OPENFIRE_DIR" "file:///$OPENFIRE_SAVE/openfire"
+
+	echo "Deleting old openfire backup"
+	del_old "${OPENFIRE_SAVE}/.."
+}
+
+del_old()
+{
+	if [ "$MAX_KEEP" -ne 0 ]
+	then
+		IFS=$'\n'
+		DIR_DEL="$(find "$1" -maxdepth 1 -mtime +${MAX_KEEP} -and -not -path "$1")"
+		for i in $DIR_DEL
+		do
+			echo "Deleting $i"
+			rm -rf "$i"
+		done
+		unset IFS
+
+	else
+		echo "Not configured to delete old backup"
+	fi
+}
+
+
+if [ "$URL_TYPE" == "smb" ]
+then
+	smb_mount
+else
+	BACKUP_SAVE="$BACKUP_DIR"
+fi
+echo "Backup will be saved in $BACKUP_SAVE"
 
 generate_timestamp
 FILENAME="$(basename $0)"
@@ -110,7 +171,7 @@ for BAK in $BACKUP_ARG
 do
 	case "$BAK" in
 		openfire) echo "Backuping Openfire"
-			  #backup_openfire 
+			  backup_openfire 
 			  ;;
 		zimbra) echo "Backuping Zimbra"
 			backup_zimbra 

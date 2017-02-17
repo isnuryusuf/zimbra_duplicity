@@ -13,3 +13,9 @@ bin/backup.zimbra # shortcut for backup only zimbra
 
 For backup alfresco and openfire:  
 bin/backup alfresco openfire
+
+##TODO:
+* ~~SMB MOUNTING~~
+* LOG and ERROR EXCEPTION
+* ~~REMOVE PREVIOUS BACKUP~~
+* ADD RESTORE SCRIPT

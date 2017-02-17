@@ -1,0 +1,568 @@
+#Created by Muhammad Solihin I-3
+#!/bin/bash
+#duplicity collection-status file:///mnt/backup_smb/testing_backup/zimbra/2017-01-28/store/ | grep -e Full -e Incremental | sed -e 's/                Full         //g' -e 's/         Incremental         //g' -e 's/   .*$//g'
+CONF_DIR="$(dirname $0)/.."
+. "$CONF_DIR/backup.conf"
+
+smb_mount ()
+{
+        SMB_OPTIONS=""
+        MOUNTED_URL=$(mount | grep "$SMB_URL" | sed -e 's/^.*on //g' -e 's/ type.*$//')
+
+        # if smb isn't mounted yet
+        if [ "$MOUNTED_URL" != "$SMB_MOUNT_DIR" ]
+        then
+                # mounting smb
+                echo "Mounting samba file share to $SMB_MOUNT_DIR"
+                if [ "$SMB_USER" == "guest" ]
+                then
+                        SMB_OPTIONS="${SMB_OPTIONS}guest"
+                else
+                        SMB_OPTIONS="${SMB_OPTIONS}username=${SMB_USER},password=${SMB_PASSWORD},domain=${SMB_DOMAIN}"
+                fi
+
+                mkdir -p "$SMB_MOUNT_DIR"
+                mount.cifs "$SMB_URL" "$SMB_MOUNT_DIR" -o "$SMB_OPTIONS"
+                if [ "$?" -ne 0 ]
+                then
+                        echo "Could not mount smb" >&2 
+                        exit -1
+                else
+                        MOUNTED_URL="$SMB_MOUNT_DIR"
+                fi
+        else
+                echo "SMB file share is already mounted on $MOUNTED_URL"
+        fi
+        BACKUP_SAVE="${MOUNTED_URL}/${BACKUP_DIR}"
+}
+
+restore_zimbra()
+{
+	ZIMBRA_DATE=$(date -d "$1" +%F)
+	DUPLICITY_DATE=$(date -d "$1")
+	generate_timestamp "$ZIMBRA_DATE"
+	ZIMBRA_BACKUP_DIR="$BACKUP_SAVE/zimbra/$FULL_TIMESTAMP"
+	ZIMBRA_ZMLOCALCONFIG="$ZIMBRA_DIR/conf/localconfig.xml"
+	ZIMBRA_LDAP_DIR="$ZIMBRA_DIR/data/ldap"
+	ZIMBRA_LDAP_MDB_DIR="$ZIMBRA_LDAP_DIR/mdb"
+	ZIMBRA_LDAP_CONFIG="$ZIMBRA_LDAP_DIR/config"
+	ZIMBRA_BACKUP_ZMLOCALCONFIG="$ZIMBRA_BACKUP_DIR/localconfig.xml.$ZIMBRA_DATE"
+	ZIMBRA_BACKUP_LDAP="$ZIMBRA_BACKUP_DIR/ldap.bak.$ZIMBRA_DATE"
+	ZIMBRA_SLAPADD="$ZIMBRA_DIR/openldap/sbin/slapadd"
+
+	ZIMBRA_BACKUP_MYSQL="$ZIMBRA_BACKUP_DIR/mysql.sql.$ZIMBRA_DATE"
+	ZIMBRA_INDEX_BACKUP="$ZIMBRA_BACKUP_DIR/index"
+	ZIMBRA_STORE_BACKUP="$ZIMBRA_BACKUP_DIR/store"
+	ZIMBRA_INDEX_DIR="$ZIMBRA_DIR/index"
+	ZIMBRA_STORE_DIR="$ZIMBRA_DIR/store"
+
+
+	ZIMBRA_INDEX_DATE=""
+	ZIMBRA_STORE_DATE=""
+	
+	IFS=$'\n'
+	DAY_LIST=$(duplicity collection-status file://$ZIMBRA_INDEX_BACKUP | grep -e Full -e Incremental | sed -e 's/                Full         //g' -e 's/         Incremental         //g' -e 's/   .*$//g')
+	for i in $DAY_LIST
+	do
+		x=$(date -d "$i" +%F)
+		if [ "$x" == "$ZIMBRA_DATE" ]
+		then
+			ZIMBRA_INDEX_DATE="$i"
+		fi
+	done
+	
+	DAY_LIST=$(duplicity collection-status file://$ZIMBRA_STORE_BACKUP | grep -e Full -e Incremental | sed -e 's/                Full         //g' -e 's/         Incremental         //g' -e 's/   .*$//g')
+	for i in $DAY_LIST
+	do
+		x=$(date -d "$i" +%F)
+		if [ "$x" == "$ZIMBRA_DATE" ]
+		then
+			ZIMBRA_STORE_DATE="$i"
+		fi
+	done
+	unset IFS
+	
+
+
+	#cek file backup
+	#cek file zmlocalconfig
+	if [ -e "$ZIMBRA_BACKUP_ZMLOCALCONFIG" ]
+	then
+		echo "zmlocalconfig found"
+	else
+		echo "ERROR: zmlocalconfig not found. Exiting" >&2
+		exit 1
+	fi
+
+	#cek file ldap
+	if [ -e "$ZIMBRA_BACKUP_LDAP" ]
+	then
+		echo "LDAP dump found"
+	else
+		echo "ERROR: LDAP dump not found. Exiting" >&2
+		exit 1
+	fi
+
+	#cek file mysql
+	if [ -e "$ZIMBRA_BACKUP_MYSQL" ]
+	then
+		echo "MySQL dump found"
+	else
+		echo "ERROR: MySQL dump not found. Exiting" >&2
+		exit 1
+	fi
+	
+	#cek direktori index
+	VERIFY_DUPLICITY=$(duplicity collection-status "file://$ZIMBRA_INDEX_BACKUP" | grep "$ZIMBRA_INDEX_DATE")
+	if [ -n "$VERIFY_DUPLICITY" ]
+	then
+		echo "Index backup found"
+	else
+		echo "ERROR: Index backup not found. Exiting" >&2
+		exit 1
+	fi
+	
+	#cek direktori store
+	VERIFY_DUPLICITY=$(duplicity collection-status "file://$ZIMBRA_STORE_BACKUP" | grep "$ZIMBRA_STORE_DATE")
+	if [ -n "$VERIFY_DUPLICITY" ]
+	then
+		echo "Store backup found"
+	else
+		echo "ERROR: Store backup not found. Exiting" >&2
+		exit 1
+	fi
+
+
+	#stop zimbra
+	/etc/init.d/zimbra stop
+
+	#backup file zmlocalconfig yang sekarang
+	ZIMBRA_ZMLOCALCONFIG_TMP="${ZIMBRA_ZMLOCALCONFIG}.bak.$(date +%Y%m%d%H%M%S)"
+	echo "Backuping current zmlocalconfig"
+	cp "$ZIMBRA_ZMLOCALCONFIG" "$ZIMBRA_ZMLOCALCONFIG_TMP"
+	if [ "$?" -ne 0 ]
+	then
+		echo "Failed to backup zmlocalconfig, exiting"
+		exit 1
+	fi
+
+	#todo: restore zmlocalconfig
+	echo "Restore zmlocalconfig"
+	cp  "$ZIMBRA_BACKUP_ZMLOCALCONFIG" "$ZIMBRA_ZMLOCALCONFIG"
+
+	#todo: kalo fail, kembalikan backupan zmlocalconfig yang tadi
+	if [ "$?" -ne 0 ]
+	then
+		echo "Failed to restore zmlocalconfig, restore previous zmlocalconfig" >&2
+		cp "$ZIMBRA_ZMLOCALCONFIG_TMP" "$ZIMBRA_ZMLOCALCONFIG" 
+	fi
+
+	#todo: backup ldap yang sekarang
+	echo "Backuping current ldap dir"
+	ZIMBRA_LDAP_MDB_TMP="${ZIMBRA_LDAP_MDB_DIR}.bak.$(date +%Y%m%d%H%M%S)"
+	mv "$ZIMBRA_LDAP_MDB_DIR" "$ZIMBRA_LDAP_MDB_TMP"
+	if [ "$?" -ne 0 ]
+	then
+		echo "Failed to backup ldap dir, restore previous zmlocalconfig, exiting" >&2
+		cp "$ZIMBRA_ZMLOCALCONFIG_TMP" "$ZIMBRA_ZMLOCALCONFIG" 
+		exit 1
+	fi
+	
+
+	#todo: restore ldap
+	echo "Restore ldap"
+	mkdir -p "$ZIMBRA_LDAP_MDB_DIR"/{db,logs} 
+	chown -R zimbra:zimbra "$ZIMBRA_LDAP_MDB_DIR"
+	chmod -R 755 "$ZIMBRA_LDAP_MDB_DIR"
+	
+	su - zimbra -c "$ZIMBRA_SLAPADD -F $ZIMBRA_LDAP_CONFIG -qcv -l $ZIMBRA_BACKUP_LDAP"
+	
+	#todo: kalo fail, kembalikan backupan zmlocalconfig dan ldap
+	if [ "$?" -ne 0 ]
+	then
+		echo "restore LDAP failed, restore previous zmlocalconfig and ldap" >&2
+		cp "$ZIMBRA_ZMLOCALCONFIG_TMP" "$ZIMBRA_ZMLOCALCONFIG" 
+		rm -rf "$ZIMBRA_LDAP_MDB_DIR"
+		mv "$ZIMBRA_LDAP_MDB_TMP" "$ZIMBRA_LDAP_MDB_DIR"
+		exit 1
+	fi
+
+	#backup mysql
+	ZIMBRA_MYSQL_SERVER="$ZIMBRA_DIR/bin/mysql.server"
+	ZIMBRA_MYSQL_BIN="$ZIMBRA_DIR/bin/mysql"
+	echo "Backuping MYSQL"
+	su - zimbra -c "$ZIMBRA_MYSQL_SERVER start"
+	ZIMBRA_MYSQL_TMP="/tmp/mysql.bak.$(date +%Y%m%d%H%M%S)"
+	ZIMBRA_MYSQLDUMP="$ZIMBRA_DIR/mysql/bin/mysqldump"
+	ZIMBRA_ZMLOCALCONFIG="$ZIMBRA_DIR/bin/zmlocalconfig"
+        ZIMBRA_MYSQLSOCK="$ZIMBRA_DIR/db/mysql.sock"
+	#su - zimbra -c "$ZIMBRA_MYSQLDUMP -f -S $ZIMBRA_MYSQLSOCK -u zimbra --password=`$ZIMBRA_ZMLOCALCONFIG -s -m nokey zimbra_mysql_password` --all-databases --single-transaction > $ZIMBRA_MYSQL_TMP"
+	su - zimbra -c "$ZIMBRA_MYSQLDUMP -f -S $ZIMBRA_MYSQLSOCK -u root --password=`$ZIMBRA_ZMLOCALCONFIG -s -m nokey mysql_root_password` --all-databases --single-transaction --flush-logs > $ZIMBRA_MYSQL_TMP"
+
+
+	#restore mysql
+	echo "Restore MySQL"
+	su - zimbra -c "$ZIMBRA_MYSQL_BIN -f -u root --password=`$ZIMBRA_ZMLOCALCONFIG -s -m nokey mysql_root_password` < $ZIMBRA_BACKUP_MYSQL"
+	su - zimbra -c "$ZIMBRA_MYSQL_SERVER stop"
+
+
+	export PASSPHRASE="$DUPLICITY_PASSPHRASE"
+
+	#backup index dir
+	echo "Backup index dir"
+	ZIMBRA_INDEX_TMP="${ZIMBRA_INDEX_DIR}.$(date +%Y%m%d%H%M%S)"
+	mv "$ZIMBRA_INDEX_DIR" "$ZIMBRA_INDEX_TMP"
+	#backup store dir
+	echo "Backup store dir"
+	ZIMBRA_STORE_TMP="${ZIMBRA_STORE_DIR}.$(date +%Y%m%d%H%M%S)"
+	mv "$ZIMBRA_STORE_DIR" "$ZIMBRA_STORE_TMP"
+	
+	#restore index dir
+	echo "Restore Index dir"
+	mkdir -p "$ZIMBRA_INDEX_DIR"
+	chown zimbra:zimbra "$ZIMBRA_INDEX_DIR"
+	chmod 755 "$ZIMBRA_INDEX_DIR"
+	duplicity -t $(date -d "$ZIMBRA_INDEX_DATE" +'%Y-%m-%dT%H:%M:%S') "file://$ZIMBRA_INDEX_BACKUP" "$ZIMBRA_INDEX_DIR"
+	echo "Restore Store dir"
+	mkdir -p "$ZIMBRA_STORE_DIR"
+	chown zimbra:zimbra "$ZIMBRA_STORE_DIR"
+	chmod 755 "$ZIMBRA_STORE_DIR"
+	duplicity -t $(date -d "$ZIMBRA_STORE_DATE" '+%Y-%m-%dT%H:%M:%S') "file://$ZIMBRA_STORE_BACKUP" "$ZIMBRA_STORE_DIR"
+
+	/etc/init.d/zimbra start
+}
+
+restore_openfire()
+{
+	#OPENFIRE_DIR=/opt/openfire-coba
+        OPENFIRE_DATE=$(date -d "$1" +%F)
+        generate_timestamp "$OPENFIRE_DATE"
+        OPENFIRE_BACKUP_DIR="$BACKUP_SAVE/openfire/$FULL_TIMESTAMP/openfire"
+
+	IFS=$'\n'
+        DAY_LIST=$(duplicity collection-status file://$OPENFIRE_BACKUP_DIR | grep -e Full -e Incremental | sed -e 's/                Full         //g' -e 's/         Incremental         //g' -e 's/   .*$//g')
+        for i in $DAY_LIST
+        do
+                x=$(date -d "$i" +%F)
+                if [ "$x" == "$OPENFIRE_DATE" ]
+                then
+                        DUPLICITY_DATE="$i"
+                fi
+        done
+	unset IFS
+
+        #cek direktori backup openfire
+
+        VERIFY_DUPLICITY=$(duplicity collection-status "file://$OPENFIRE_BACKUP_DIR" | grep "$DUPLICITY_DATE")
+        if [ -n "$VERIFY_DUPLICITY" ]
+        then
+                echo "Openfire backup found"
+        else
+                echo "ERROR: Openfire backup not found. Exiting" >&2
+                exit 1
+        fi
+	#exit
+
+        #stop openfire
+        /etc/init.d/openfire stop
+
+        #backup openfire yang sekarang
+        OPENFIRE_TMP="/tmp/openfire.bak.$(date +%Y%m%d%H%M%S)"
+        echo "Backup current openfire"
+        cp -r "$OPENFIRE_DIR" "$OPENFIRE_TMP"
+
+        if [ "$?" -ne 0 ]
+        then
+                echo "ERROR: Backup current Openfire failed, exiting" >&2
+                exit 1
+        fi
+
+        #restore openfire
+	echo "Restore openfire"
+        rm -rf $OPENFIRE_DIR/*
+
+	export PASSPHRASE="$DUPLICITY_PASSPHRASE"
+        duplicity -t $(date -d "$DUPLICITY_DATE" '+%Y-%m-%dT%H:%M:%S') "file://$OPENFIRE_BACKUP_DIR" "$OPENFIRE_DIR"
+        /etc/init.d/openfire start
+}
+
+restore_alfresco()
+{
+        #OPENFIRE_DIR=/opt/openfire-coba
+        ALFRESCO_DATE=$(date -d "$1" +%F)
+        generate_timestamp "$ALFRESCO_DATE"
+        ALFRESCO_BACKUP_DIR="$BACKUP_SAVE/alfresco/$FULL_TIMESTAMP"
+
+        IFS=$'\n'
+        DAY_LIST=$(duplicity collection-status file://$ALFRESCO_BACKUP_DIR/alf_data | grep -e Full -e Incremental | sed -e 's/                Full         //g' -e 's/         Incremental         //g' -e 's/   .*$//g')
+        for i in $DAY_LIST
+        do
+                x=$(date -d "$i" +%F)
+                if [ "$x" == "$ALFRESCO_DATE" ]
+                then
+                        DUPLICITY_DATE="$i"
+                fi
+        done
+        unset IFS
+
+	#cek alfresco global backup
+
+	ALFRESCO_PROPERTIES_BACKUP="$ALFRESCO_BACKUP_DIR/alfresco-global.properties.$ALFRESCO_DATE"
+
+	if [ -e "$ALFRESCO_PROPERTIES_BACKUP" ]
+        then
+                echo "Alfresco Properties backup found"
+        else
+                echo "ERROR: Alfresco Properties backup not found. Exiting" >&2
+                exit 1
+        fi
+
+	
+	#cek sql backup
+	ALFRESCO_SQL_BACKUP="$ALFRESCO_BACKUP_DIR/pgsql_dump.tar.$ALFRESCO_DATE"
+	
+	if [ -e "$ALFRESCO_SQL_BACKUP" ]
+        then
+                echo "Alfresco SQL backup found"
+        else
+                echo "ERROR: Alfresco SQL backup not found. Exiting" >&2
+                exit 1
+        fi
+
+        #cek direktori alf_data backup
+
+        VERIFY_DUPLICITY=$(duplicity collection-status "file://$ALFRESCO_BACKUP_DIR/alf_data" | grep "$DUPLICITY_DATE")
+        if [ -n "$VERIFY_DUPLICITY" ]
+        then
+                echo "Alfresco alf_data backup found"
+        else
+                echo "ERROR: Alfresco alf_data backup not found. Exiting" >&2
+                exit 1
+        fi
+
+        #stop alfresco
+        /etc/init.d/alfresco stop
+
+        #backup global properties yang sekarang
+        ALFRESCO_PROPERTIES="$ALFRESCO_DIR/tomcat/shared/classes/alfresco-global.properties"
+
+        ALFRESCO_PROPERTIES_TMP="$ALFRESCO_DIR/tomcat/shared/classes/alfresco-global.properties.bak.$(date +%Y%m%d%H%M%S)"
+        echo "Backup current global properties"
+        cp "$ALFRESCO_PROPERTIES" "$ALFRESCO_PROPERTIES_TMP"
+
+        if [ "$?" -ne 0 ]
+        then
+                echo "ERROR: Backup current global properties failed, exiting" >&2
+                exit 1
+        fi
+
+        #todo: backup sql yang sekarang
+	echo "Backup current sql"
+	ALFRESCO_PGSQL_BINDIR="$ALFRESCO_DIR/postgresql/bin"
+        ALFRESCO_PGSQLDUMP="$ALFRESCO_PGSQL_BINDIR/pg_dump"
+	ALFRESCO_SQL_TMP="/tmp/pgsql_dump.tar.$(date +%Y%m%d%H%M%S)"
+
+	"$ALFRESCO_DIR/postgresql/scripts/ctl.sh" start
+	export PGPASSWORD="$ALFRESCO_PGPASSWORD"
+        "$ALFRESCO_PGSQLDUMP" -Ft -b alfresco > "$ALFRESCO_SQL_TMP"
+
+
+        if [ "$?" -ne 0 ]
+        then
+                echo "ERROR: Backup current SQL failed, exiting" >&2
+                exit 1
+        fi
+
+	#backup alf_data sekarang
+	echo "Backup current alf_data"
+	ALFRESCO_ALFDATA="$ALFRESCO_DIR/alf_data"
+	ALFRESCO_ALFDATA_TMP="$ALFRESCO_DIR/alf_data.$(date +%Y%m%d%H%M%S)"
+	cp -r "$ALFRESCO_ALFDATA" "$ALFRESCO_ALFDATA_TMP"
+        if [ "$?" -ne 0 ]
+        then
+                echo "ERROR: Backup current alf_data failed, exiting" >&2
+                exit 1
+        fi
+
+
+	#restore global properties
+	echo "Restore Alfresco Global Properties"
+        ALFRESCO_PROPERTIES="$ALFRESCO_DIR/tomcat/shared/classes/alfresco-global.properties"
+	cp "$ALFRESCO_PROPERTIES_BACKUP" "$ALFRESCO_PROPERTIES"
+	
+        if [ "$?" -ne 0 ]
+        then
+                echo "ERROR: Restore global properties failed, exiting" >&2
+                exit 1
+        fi
+
+	#restore SQL
+	echo "Restore Alfresco SQL"
+	ALFRESCO_PSQL="$ALFRESCO_DIR/postgresql/bin/psql"
+	ALFRESCO_PG_RESTORE="$ALFRESCO_DIR/postgresql/bin/pg_restore"
+	export PGPASSWORD="$ALFRESCO_PGPASSWORD"
+	"$ALFRESCO_PSQL" -c "DROP DATABASE alfresco"
+	"$ALFRESCO_PSQL" -c "CREATE DATABASE alfresco WITH OWNER alfresco"
+	"$ALFRESCO_PSQL" -U alfresco -d alfresco -c "ALTER USER alfresco WITH PASSWORD 'admin123!@#'"
+	"$ALFRESCO_PG_RESTORE" -d alfresco "$ALFRESCO_SQL_BACKUP"
+	"$ALFRESCO_DIR/postgresql/scripts/ctl.sh" stop
+        if [ "$?" -ne 0 ]
+        then
+                echo "ERROR: Restore Alfresco SQL failed, exiting" >&2
+                exit 1
+        fi
+	
+	
+
+	#restore alf_data 
+	echo "Restore Alfresco alf_data"
+	rm -rf "$ALFRESCO_ALFDATA"/*
+        export PASSPHRASE="$DUPLICITY_PASSPHRASE"
+        duplicity -t $(date -d "$DUPLICITY_DATE" '+%Y-%m-%dT%H:%M:%S') "file://$ALFRESCO_BACKUP_DIR/alf_data" "$ALFRESCO_ALFDATA"
+        if [ "$?" -ne 0 ]
+        then
+                echo "ERROR: Restore Alfresco alf_data failed, exiting" >&2
+                exit 1
+        fi
+
+	/etc/init.d/alfresco start
+
+}
+#restore_ldap_mailbox()
+#{
+#
+#}
+
+DELIMITER="##################################################"
+
+MENU_DISPLAY=()
+MENU_COMMAND=()
+MENU_NUM=0
+MENU_BACK=""
+menu_day()
+{
+	IFS=$'\n'
+	if [ "$1" == "zimbra" ]
+	then
+		FETCH_DIR="$BACKUP_SAVE/zimbra/$2/store"
+		SERVICE_COMMAND="restore_zimbra"
+	elif [ "$1" == "alfresco" ]
+	then
+		FETCH_DIR="$BACKUP_SAVE/alfresco/$2/alf_data"
+		SERVICE_COMMAND="restore_alfresco"
+	elif [ "$1" == "openfire" ]
+	then
+		FETCH_DIR="$BACKUP_SAVE/openfire/$2/openfire"
+		SERVICE_COMMAND="restore_openfire"
+	fi
+
+	DAY_LIST=$(duplicity collection-status file://$FETCH_DIR | grep -e Full -e Incremental | sed -e 's/                Full         //g' -e 's/         Incremental         //g' -e 's/   .*$//g')
+	PREV=""
+	MENU_NUM=0
+	for i in $DAY_LIST
+	do
+		SIMPLE_DATE=$(date -d "$i" +%F)
+		if [ "$SIMPLE_DATE" != "$PREV" ]
+		then
+			MENU_NUM=$[MENU_NUM+1]
+		fi
+		PREV="$SIMPLE_DATE"
+		MENU_DISPLAY[$MENU_NUM]="$(date -d $i +%F)"
+		MENU_COMMAND[$MENU_NUM]="$SERVICE_COMMAND \"$i\""
+	done
+	echo "Restore Day:"
+	display_menu
+	MENU_BACK="menu_day $1 $2"
+	unset IFS
+	echo "$DELIMITER"
+	eval ${MENU_COMMAND[$PICK]}
+}
+menu_service()
+{
+	MENU_NUM=4
+	MENU_DISPLAY=("" "zimbra" "alfresco" "openfire" "exit")
+	MENU_COMMAND=("" "menu_week zimbra" "menu_week alfresco" "menu_week openfire" "exit")
+	x=1
+	echo "Service you want restore:"
+	while [ $MENU_NUM -ge $x ]
+	do
+		echo "$x) ${MENU_DISPLAY[$x]}"
+		x=$[x+1]
+	done
+	read -p "Choose option: " PICK
+	
+	MENU_BACK="menu_service"
+	echo "$DELIMITER"
+	eval ${MENU_COMMAND[$PICK]}
+}
+
+display_menu()
+{
+	MENU_NUM=$[MENU_NUM+1]
+	MENU_DISPLAY[$MENU_NUM]="Back"
+	MENU_COMMAND[$MENU_NUM]="$MENU_BACK"
+	MENU_NUM=$[MENU_NUM+1]
+	MENU_DISPLAY[$MENU_NUM]="Home"
+	MENU_COMMAND[$MENU_NUM]="menu_service"
+	MENU_NUM=$[MENU_NUM+1]
+	MENU_DISPLAY[$MENU_NUM]="Exit"
+	MENU_COMMAND[$MENU_NUM]="exit"
+	x=1
+	while [ $MENU_NUM -ge $x ]
+	do
+		echo "$x) ${MENU_DISPLAY[$x]}"
+		x=$[x+1]
+	done
+	read -p "Choose option: " PICK
+
+}
+
+menu_week()
+{
+	echo "Restore Week:"
+	IFS=$'\n'
+	WEEK_LIST="$(ls $BACKUP_SAVE/$1)"
+	MENU_NUM=0
+	for i in $WEEK_LIST
+	do
+		MENU_NUM=$[MENU_NUM+1]
+		MENU_DISPLAY[$MENU_NUM]="$i"
+		MENU_COMMAND[$MENU_NUM]="menu_day $1 $i"
+	done
+	display_menu
+	MENU_BACK="menu_week $1"
+	unset IFS
+	echo "$DELIMITER"
+	eval ${MENU_COMMAND[$PICK]}
+}
+
+#restore_zimbra()
+#{
+#	echo $1
+#}
+
+FULL_TIMESTAMP=""
+NOW_TIMESTAMP=""
+generate_timestamp ()
+{
+        FULL_DAY_NUM=$(date -d "${FULL_DAY}" +%w)
+        BACKUP_NUM=$(date -d "$1" +%w)
+        if [ "$BACKUP_NUM" -ge "$FULL_DAY_NUM" ]
+        then
+                DAYS_AGO_NUM=$[BACKUP_NUM-FULL_DAY_NUM]
+        else
+                DAYS_AGO_NUM=$[7+BACKUP_NUM-FULL_DAY_NUM]
+        fi
+        FULL_TIMESTAMP=$(date -d "$1 -${DAYS_AGO_NUM} days" +%F)
+        NOW_TIMESTAMP=$(date +%F)
+}
+
+if [ "$URL_TYPE" == "smb" ]
+then
+        smb_mount
+else
+        BACKUP_SAVE="$BACKUP_DIR"
+fi
+
+echo "Backup will be restored from $BACKUP_SAVE"
+menu_service 
