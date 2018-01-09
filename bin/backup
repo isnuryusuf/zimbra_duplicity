@@ -1,4 +1,4 @@
-#Created by Muhammad Solihin I-3
+#Edited by Yusuf Hadiwinata I-3
 #!/bin/bash
 CONF_DIR="$(dirname $0)/.."
 . "$CONF_DIR/backup.conf"
