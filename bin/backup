@@ -53,26 +53,6 @@ generate_timestamp ()
 	NOW_TIMESTAMP=$(date +%F)
 }
 
-backup_alfresco ()
-{
-	ALFRESCO_SAVE="$BACKUP_SAVE/alfresco/$FULL_TIMESTAMP"
-	ALFRESCO_PROPERTIES="$ALFRESCO_DIR/tomcat/shared/classes/alfresco-global.properties"
-	ALFRESCO_PGSQL_BINDIR="$ALFRESCO_DIR/postgresql/bin"
-	ALFRESCO_PGSQLDUMP="$ALFRESCO_PGSQL_BINDIR/pg_dump"
-
-	mkdir -p "$ALFRESCO_SAVE"
-	cp "$ALFRESCO_PROPERTIES" "$ALFRESCO_SAVE/$(basename $ALFRESCO_PROPERTIES).$NOW_TIMESTAMP"
-
-	export PGPASSWORD="$ALFRESCO_PGPASSWORD"
-	"$ALFRESCO_PGSQLDUMP" -Ft -b alfresco > "$ALFRESCO_SAVE/pgsql_dump.tar.$NOW_TIMESTAMP"
-
-	mkdir -p "$ALFRESCO_SAVE/alf_data"
-	export PASSPHRASE="$DUPLICITY_PASSPHRASE"
-	"$DUPLICITY" "$ALFRESCO_DIR/alf_data" "file:///$ALFRESCO_SAVE/alf_data"
-
-	echo "Deleting old alfresco backup"
-	del_old "${ALFRESCO_SAVE}/.."
-}
 
 backup_zimbra()
 {
@@ -109,18 +89,6 @@ backup_zimbra()
 	del_old "${ZIMBRA_SAVE}/.."
 }
 
-backup_openfire()
-{
-	OPENFIRE_SAVE="$BACKUP_SAVE/openfire/$FULL_TIMESTAMP"
-	mkdir -p "$OPENFIRE_SAVE"
-	
-	# untuk sementara copy aja direktori openfirenya
-	export PASSPHRASE="$DUPLICITY_PASSPHRASE"
-	"$DUPLICITY" "$OPENFIRE_DIR" "file:///$OPENFIRE_SAVE/openfire"
-
-	echo "Deleting old openfire backup"
-	del_old "${OPENFIRE_SAVE}/.."
-}
 
 del_old()
 {
