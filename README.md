@@ -1,4 +1,4 @@
-# backup_alofzim
+# backup_zimbra_duplicity
 Ini Script Backup Untuk Zimbra
 
 ##Usage:
