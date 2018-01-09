@@ -123,8 +123,6 @@ EXTENSION="${FILENAME##*.}"
 
 BACKUP_ARG="$EXTENSION"
 case "$EXTENSION" in
-	alfresco) ;;
-	openfire);;
 	zimbra);;
 	*)
 		BACKUP_ARG="$*";;
@@ -132,20 +130,14 @@ esac
 
 if [ -z "$BACKUP_ARG" ]
 then
-	BACKUP_ARG="openfire alfresco zimbra"
+	BACKUP_ARG="zimbra"
 fi
 
 for BAK in $BACKUP_ARG
 do
 	case "$BAK" in
-		openfire) echo "Backuping Openfire"
-			  backup_openfire 
-			  ;;
 		zimbra) echo "Backuping Zimbra"
 			backup_zimbra 
-			;;
-		alfresco) echo "Backuping Alfresco"
-			backup_alfresco 
 			;;
 	esac
 done
