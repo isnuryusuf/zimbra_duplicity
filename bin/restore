@@ -1,4 +1,4 @@
-#Created by Muhammad Solihin I-3
+#edited by Yusuf Hadiwinata I-3
 #!/bin/bash
 #duplicity collection-status file:///mnt/backup_smb/testing_backup/zimbra/2017-01-28/store/ | grep -e Full -e Incremental | sed -e 's/                Full         //g' -e 's/         Incremental         //g' -e 's/   .*$//g'
 CONF_DIR="$(dirname $0)/.."
